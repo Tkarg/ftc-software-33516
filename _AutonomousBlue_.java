@@ -4,6 +4,7 @@ import androidx.annotation.NonNull;
 
 import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
 import com.acmerobotics.roadrunner.Action;
+import com.acmerobotics.roadrunner.ParallelAction;
 import com.acmerobotics.roadrunner.Pose2d;
 import com.acmerobotics.roadrunner.SequentialAction;
 import com.acmerobotics.roadrunner.Vector2d;
@@ -14,6 +15,7 @@ import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.HardwareMap;
+import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 import com.qualcomm.robotcore.hardware.Servo;
 
 import com.qualcomm.robotcore.util.ElapsedTime;
@@ -21,27 +23,27 @@ import java.util.concurrent.TimeUnit;
 
 /*
 *
-* Trước khi đi vào phần mã chính, chúng ta sẽ có một vài lưu ý để thuận tiện lập trình.
+* Before anything, we have a few notes:
 *
-* Mô-tơ coi chiều dương là chiều quay ngược chiều kim đồng hồ theo hướng mô-tơ.
+* Positive direction is clockwise from the perspective opposite to the motor axially.
 *
-* Mô-tơ REV và GoBilda hiện tại đang dùng REV 41 và GoBilda dòng 5203.
+* We are using REV 41 and GoBilda 5203 for the launcher because we are out of resources.
+*
+* Latest measurement gives 12150 ticks per 23.8125 in, for our tiles are not perfect.
 *
 * */
 
 @Autonomous(name = "BLUE")
 public class _AutonomousBlue_ extends LinearOpMode{
 
-    //LẤY BÓNG TỪ SÂN.
-    public class Intake{
-
-        private DcMotorEx GoBildaLauncher, REVLauncher;
-        private DcMotor GoBilda3_Intake;
-        private DcMotor REV_Loader;
-
+    public static class Intake{
+        private final DcMotorEx GoBildaLauncher, REVLauncher;
+        private final DcMotor GoBilda3_Intake;
+        private final DcMotor REV_Loader;
         public double TPR = 28;
 
         public Intake(HardwareMap hardwareMap){
+            //Launcher will help push the artefacts downwards so they will not get stuck.
             GoBildaLauncher = hardwareMap.get(DcMotorEx.class, "GoBildaLauncher");
             GoBildaLauncher.setDirection(DcMotorSimple.Direction.FORWARD);
             GoBildaLauncher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
@@ -50,6 +52,7 @@ public class _AutonomousBlue_ extends LinearOpMode{
             REVLauncher.setDirection(DcMotorSimple.Direction.REVERSE);
             REVLauncher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
             REVLauncher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+            //Basic intake with rubber bands for friction.
             GoBilda3_Intake = hardwareMap.get(DcMotor.class, "GoBildaIntake");
             GoBilda3_Intake.setDirection(DcMotorSimple.Direction.REVERSE);
             GoBilda3_Intake.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
@@ -58,12 +61,13 @@ public class _AutonomousBlue_ extends LinearOpMode{
             REV_Loader.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
         }
 
-        //NHẶT BÓNG.
         public class Take_Artefact implements Action {
             @Override
             public boolean run(@NonNull TelemetryPacket telemetry){
                 GoBilda3_Intake.setPower(1);
                 REV_Loader.setPower(0.35);
+                GoBildaLauncher.setVelocity((-1100.0 / 60.0) * TPR);
+                REVLauncher.setVelocity((-1100.0 / 60.0) * TPR);
                 return false;
             }
         }
@@ -71,14 +75,11 @@ public class _AutonomousBlue_ extends LinearOpMode{
             return new Take_Artefact();
         }
 
-        //NHẢ BÓNG.
         public class Discard_Artefact implements Action {
             @Override
             public boolean run(@NonNull TelemetryPacket telemetry){
                 GoBilda3_Intake.setPower(-1);
                 REV_Loader.setPower(-0.79);
-                GoBildaLauncher.setVelocity((-100.0 / 60.0) * TPR);
-                REVLauncher.setVelocity((-100.0 / 60.0) * TPR);
                 return false;
             }
         }
@@ -86,7 +87,6 @@ public class _AutonomousBlue_ extends LinearOpMode{
             return new Discard_Artefact();
         }
 
-        //GIỮ BÓNG.
         public class Keep_Artefact implements Action {
             @Override
             public boolean run(@NonNull TelemetryPacket telemetry){
@@ -100,61 +100,56 @@ public class _AutonomousBlue_ extends LinearOpMode{
         }
     }
 
-    public class Launcher{
+    public static class Turret{
 
-        private DcMotorEx GoBildaLauncher, REVLauncher;
-
-        private DcMotor REVLoader, GoBildaIntake;
-
-        private Servo Aimer;
-
-        private double LaunchSpeed = 2350;
-
-        public double TPR = 28;
-
-        public ElapsedTime timer = new ElapsedTime();
+        private final DcMotorEx GoBildaLauncher, REVLauncher;
+        private final DcMotor REVLoader, GoBildaIntake;
+        Servo Aimer;
+        double LaunchSpeed = 2500;
 
         /*
-         *
-         * Gia tốc tiếp tuyến bánh bắn:
-         *
-         *       v = r * o.
-         *
-         *       Với v là vận tốc, r là bán kính, o là vận tốc góc.
-         *
-         * Ta có khoảng cách đến điểm rơi bóng tính bằng công thức:
-         *
-         *       v^2 * sin(2 * z) / g.
-         *
-         *       Với v là vận tốc bắn, z là góc bắn, và g là gia tốc trọng trường.
-         *
-         * Servo của rô-bốt sẽ chỉnh góc bắn trong khoảng 20 độ đến 60 độ so với phương ngang.
-         *
-         * Mã sử dụng các công thức ở khoảng dòng 200.
-         *
-         * */
+        * Launch speed and servo aiming was determined quasi-empirically.
+        *
+        *   POINT       LAUNCHER        SERVO       DISTANCE TO TARGET
+        *   (+00;+00)   2830            0.5         101.823
+        *   (-12;-12)   2650            0.25        084.853
+        *   (-24;-24)   2500            0           067.882
+        *
+        * Position for blue target: (-72;-72).
+        *
+        * Launcher function: y = 0.0521006 x^2 + 0.881022 x + 2200.11667
+        *
+        * Aimer function: y = 0.0147314 x - 1
+        *
+        * Each field tile is 24in by 24in.
+        *
+        * Two launch locations: (-24;-24) and (+60;-12)
+        *
+        * Launch lines: x = |y| + 48 and x = -|y|.
+        *
+        * Two launch locations:
+        *
+        * POINT         DISTANCE        LAUNCHER        AIMER
+        * (-24;-24)     067.882         2500            0
+        * (+60;-12)     144.996         3425            1
+        * */
 
-        private double ServoMaxAngle = 60;
-        private double ServoMinAngle = 20;
-        public double AngularSpeed;
-        public double FlywheelRadius = 4.5;
+        public double TPR = 28;
+        PIDFCoefficients PIDF = new PIDFCoefficients(300, 0.5, 0, 19);
 
-        public double AverageLauncherVelocity;
-        public double LandingDistance = 28.284;         //KHOẢNG CÁCH CHO SẴN.
-        public double g = 9.8;                          //GIA TỐC TRỌNG TRƯỜNG.
-        public double ServoPosition = 0;
+        private final ElapsedTime timer = new ElapsedTime(ElapsedTime.Resolution.MILLISECONDS);
 
-        public double AngularOffset = 0.1;
-
-        public Launcher (HardwareMap hardwareMap){
+        public Turret (HardwareMap hardwareMap){
             GoBildaLauncher = hardwareMap.get(DcMotorEx.class, "GoBildaLauncher");
             GoBildaLauncher.setDirection(DcMotorSimple.Direction.FORWARD);
             GoBildaLauncher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
             GoBildaLauncher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+            GoBildaLauncher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, PIDF);
             REVLauncher = hardwareMap.get(DcMotorEx.class, "REVLauncher");
             REVLauncher.setDirection(DcMotorSimple.Direction.REVERSE);
             REVLauncher.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
             REVLauncher.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+            REVLauncher.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, PIDF);
 
             GoBildaIntake = hardwareMap.get(DcMotor.class, "GoBildaIntake");
             GoBildaIntake.setDirection(DcMotorSimple.Direction.REVERSE);
@@ -168,108 +163,57 @@ public class _AutonomousBlue_ extends LinearOpMode{
         }
 
         /*
-        * Cả mô-tơ GoBilda và REV đều đọc ra 28 xung mỗi vòng quay.
-        * Tốc độ mong muốn là khoảng 2700RPM, tức là 450RPS.
-        * Nhân vòng mỗi giây với số xung mỗi vòng ta có 12600 xung mỗi giây.
+        * Both GoBilda and REV have their motors running on 28 ticks each revolution.
+        * Desired speed in rotation per minute will be divided by 60 to get per second rotation.
+        * Multiply that with 28 we have the desired angular speed.
         * */
 
         public class Spool_Up implements Action {
             @Override
             public boolean run(@NonNull TelemetryPacket telemetry){
+                Aimer.setPosition(0);
                 GoBildaLauncher.setVelocity((LaunchSpeed / 60) * TPR);
                 REVLauncher.setVelocity((LaunchSpeed / 60) * TPR);
+                //Here a tolerance of 10 ticks will be allowed because we have had enough.
                 return (GoBildaLauncher.getVelocity() + REVLauncher.getVelocity()) / 2 < (LaunchSpeed / 60) * TPR - 10;
             }
         }
-
         public Action spoolUp() {
             return new Spool_Up();
         }
 
-        public class PushBack implements Action {
+        public class Launch_Artefact implements Action {
+            private boolean init = false;
             @Override
             public boolean run(@NonNull TelemetryPacket telemetry){
-                REVLoader.setPower(-0.5);
-                GoBildaIntake.setPower(-0.3);
-                REVLoader.setPower(0);
-                GoBildaIntake.setPower(0);
-                return false;
-            }
-        }
-
-        public Action pushBack(){
-            return new PushBack();
-        }
-
-        public class Launch_Artefact implements Action {
-            @Override
-            public boolean run(@NonNull TelemetryPacket telemetry) {
-                GoBildaIntake.setPower(1);
-                REVLoader.setPower(1);
-                sleep(150);
-                GoBildaIntake.setPower(0);
-                REVLoader.setPower(0);
-                sleep(150);
-                GoBildaIntake.setPower(1);
-                REVLoader.setPower(1);
-                sleep(150);
-                GoBildaIntake.setPower(0);
-                REVLoader.setPower(0);
-                sleep(150);
-                GoBildaIntake.setPower(1);
-                REVLoader.setPower(1);
-                sleep(150);
-                GoBildaIntake.setPower(0);
-                REVLoader.setPower(0);
-                return false;
-                /*
-                AverageLauncherVelocity = 0.5 * (GoBildaLauncher.getVelocity() + REVLauncher.getVelocity());
-                AngularSpeed = FlywheelRadius * (AverageLauncherVelocity / 28) * (2 * FlywheelRadius * Math.PI);
-                ServoPosition = (0.5 * Math.toDegrees(Math.asin((LandingDistance * 2 * g) / Math.pow(AngularSpeed, 2))) - 20) / 40;
-                if ((timer.time(TimeUnit.MILLISECONDS) > 300 & timer.time(TimeUnit.MILLISECONDS) < 400)
-                    | (timer.time(TimeUnit.MILLISECONDS) > 600 & timer.time(TimeUnit.MILLISECONDS) < 700)
-                    | (timer.time(TimeUnit.MILLISECONDS) > 900 & timer.time(TimeUnit.MILLISECONDS) < 1000)) {
-                    GoBildaIntake.setPower(0);
-                    REVLoader.setPower(0);
-                    if (ServoPosition > ServoMaxAngle) {
-                        if (Aimer.getPosition() + AngularOffset > 0 | Aimer.getPosition() - AngularOffset < 0){
-                            Aimer.setPosition(Aimer.getPortNumber());
-                        } else {
-                            Aimer.setPosition(0);
-                        }
-                    } else if (ServoPosition < ServoMinAngle) {
-                        if (Aimer.getPosition() + AngularOffset > 1 | Aimer.getPosition() - AngularOffset < 1){
-                            Aimer.setPosition(Aimer.getPosition());
-                        } else {
-                            Aimer.setPosition(1);
-                        }
-                    } else {
-                        if (Aimer.getPosition() + AngularOffset > ServoPosition | Aimer.getPosition() - AngularOffset < ServoPosition){
-                            Aimer.setPosition(Aimer.getPosition());
-                        } else {
-                            Aimer.setPosition(ServoPosition);
-                        }
-                    }
-                    GoBildaIntake.setPower(1);
-                    REVLoader.setPower(1);
-                    return timer.time(TimeUnit.MILLISECONDS) < 1500;
+                if (!init) {
+                    timer.reset();
+                    init = true;
                 }
-                 */
-            }
-        }
+                GoBildaIntake.setPower(0.78);
+                REVLoader.setPower(1);
+                return timer.time(TimeUnit.MILLISECONDS) < 1300;
+            }}
 
         public Action launchArtefact() {
             return new Launch_Artefact();
         }
 
         public class Halt implements Action {
+            private boolean init = false;
             @Override
             public boolean run (@NonNull TelemetryPacket telemetry){
+                if (!init) {
+                    timer.reset();
+                    init = true;
+                }
+                GoBildaLauncher.setVelocity(0);
+                REVLauncher.setVelocity(0);
                 GoBildaLauncher.setPower(0);
                 REVLauncher.setPower(0);
                 GoBildaIntake.setPower(0);
                 REVLoader.setPower(0);
-                return false;
+                return timer.time(TimeUnit.MILLISECONDS) < 500;
             }
         }
 
@@ -279,100 +223,116 @@ public class _AutonomousBlue_ extends LinearOpMode{
 
     }
 
-    //ĐƯỜNG ĐI.
+    //PATH.
 
     @Override
     public void runOpMode() throws InterruptedException{
-        Pose2d Location = new Pose2d(60, -15, Math.toRadians(180));
+        Pose2d Location = new Pose2d(-61, -6, Math.toRadians(0));
         MecanumDrive Base = new MecanumDrive(hardwareMap, Location);
         Intake intake = new Intake(hardwareMap);
-        Launcher launcher = new Launcher(hardwareMap);
+        Turret launcher = new Turret(hardwareMap);
         waitForStart();
-        Action ReadMotif = Base.actionBuilder(Location)
-                //ĐỌC MÃ BẰNG LIMELIGHT CHO VÀO ĐÂY.
-                .strafeToSplineHeading(new Vector2d(-24, -24), Math.toRadians(220))
+        Action Path1 = Base.actionBuilder(Location)
+                .strafeToSplineHeading(new Vector2d(-24, -24), Math.toRadians(225))
                 .build();
-        Action ToRow1 = Base.actionBuilder(new Pose2d(-24, -24, Math.toRadians(220)))
-                .strafeToSplineHeading(new Vector2d(-12, -20), Math.toRadians(270))
+        Action Path2 = Base.actionBuilder(new Pose2d(-24, -24, Math.toRadians(225)))
+                .strafeToSplineHeading(new Vector2d(-8, -20), Math.toRadians(270))
                 .build();
-        Action GetRow1 = Base.actionBuilder(new Pose2d(-12, -20, Math.toRadians(270)))
-                .strafeTo(new Vector2d(-12, -52))
+        Action Path3 = Base.actionBuilder(new Pose2d(-8, -20, Math.toRadians(270)))
+                .strafeTo(new Vector2d(-8, -52))
                 .build();
-        Action LeaveRow1 = Base.actionBuilder(new Pose2d(-12, -52, Math.toRadians(270)))
-                .strafeToSplineHeading(new Vector2d(-24,-24), Math.toRadians(220))
+        Action Path4 = Base.actionBuilder(new Pose2d(-8, -52, Math.toRadians(270)))
+                .strafeToSplineHeading(new Vector2d(-24, -24), Math.toRadians(225))
                 .build();
-        Action ToRow2 = Base.actionBuilder(new Pose2d(-24, -24, Math.toRadians(220)))
+        Action Path5 = Base.actionBuilder(new Pose2d(-24, -24, Math.toRadians(225)))
                 .strafeToSplineHeading(new Vector2d(12, -20), Math.toRadians(270))
                 .build();
-        Action GetRow2 = Base.actionBuilder(new Pose2d(12, -20, Math.toRadians(270)))
+        Action Path6 = Base.actionBuilder(new Pose2d(12, -20, Math.toRadians(270)))
                 .strafeTo(new Vector2d(12, -52))
                 .build();
-        Action LeaveRow2 = Base.actionBuilder(new Pose2d(12, -52, Math.toRadians(270)))
-                .strafeToSplineHeading(new Vector2d(-24,-24), Math.toRadians(220))
+        Action Path7 = Base.actionBuilder(new Pose2d(12, -52, Math.toRadians(270)))
+                .strafeToSplineHeading(new Vector2d(-24, -24), Math.toRadians(225))
                 .build();
-        Action ToRow3 = Base.actionBuilder(new Pose2d(-24, -24, Math.toRadians(220)))
+        Action Path8 = Base.actionBuilder(new Pose2d(-24, -24, Math.toRadians(225)))
                 .strafeToSplineHeading(new Vector2d(36, -20), Math.toRadians(270))
                 .build();
-        Action GetRow3 = Base.actionBuilder(new Pose2d(36, -20, Math.toRadians(270)))
+        Action Path9 = Base.actionBuilder(new Pose2d(36, -20, Math.toRadians(270)))
                 .strafeTo(new Vector2d(36, -52))
                 .build();
-        Action LeaveRow3 = Base.actionBuilder(new Pose2d(36, -52, Math.toRadians(270)))
-                .strafeToSplineHeading(new Vector2d(-24, -24), Math.toRadians(220))
-                .build();
-        Action End = Base.actionBuilder(new Pose2d(-24, -24, Math.toRadians(220)))
-                .strafeToSplineHeading(new Vector2d(60, -15), Math.toRadians(180))
+        Action PathA = Base.actionBuilder(new Pose2d(36, -52, Math.toRadians(270)))
+                .strafeToSplineHeading(new Vector2d(-24, -24), Math.toRadians(216))
                 .build();
 
-        Actions.runBlocking(
-                new SequentialAction(
-
-                        ReadMotif,                  //ĐỌC MÃ GHI THỨ TỰ BÓNG VÀ ĐẾN VỊ TRÍ BẮN BÓNG.
-
-                        launcher.pushBack(),
-                        launcher.spoolUp(),         //KHỞI ĐỘNG MÁY BẮN.
-                        launcher.launchArtefact(),  //BẮN BÓNG.
-                        launcher.halt(),            //DỪNG MÁY BẮN.
-                        intake.discardArtefact(),   //NHẢ BÓNG.
-
-                        ToRow1,                     //ĐI ĐẾN HÀNG BÓNG THỨ NHẤT.
-                        intake.takeArtefact(),      //LẤY BÓNG.
-                        GetRow1,
-                        intake.keepArtefact(),      //GIỮ BÓNG.
-                        LeaveRow1,                  //QUAY LẠI VỊ TRÍ BẮN.
-
-                        launcher.pushBack(),
-                        launcher.spoolUp(),         //KHỞI ĐỘNG MÁY BẮN.
-                        launcher.launchArtefact(),  //BẮN BÓNG.
-                        launcher.halt(),            //DỪNG MÁY BẮN.
-                        intake.discardArtefact(),   //NHẢ BÓNG.
-
-                        ToRow2,                     //ĐI ĐẾN HÀNG HAI.
-                        intake.takeArtefact(),      //LẤY BÓNG.
-                        GetRow2,
-                        intake.keepArtefact(),      //GIỮ BÓNG.
-                        LeaveRow2,                  //VỀ VỊ TRÍ BẮN.
-
-                        launcher.pushBack(),
-                        launcher.spoolUp(),         //KHỞI ĐỘNG MÁY BẮN.
-                        launcher.launchArtefact(),  //BẮN BÓNG.
-                        launcher.halt(),            //DỪNG MÁY BẮN.
-                        intake.discardArtefact(),   //NHẢ BÓNG.
-
-                        ToRow3,                     //ĐI ĐẾN HÀNG THỨ BA.
-                        intake.takeArtefact(),      //LẤY BÓNG.
-                        GetRow3,
-                        intake.keepArtefact(),      //GIỮ BÓNG.
-                        LeaveRow3,                  //VỀ VỊ TRÍ BẮN.
-
-                        launcher.pushBack(),
-                        launcher.spoolUp(),         //KHỞI ĐỘNG MÁY BẮN.
-                        launcher.launchArtefact(),  //BẮN BÓNG.
-                        launcher.halt(),            //DỪNG MÁY BẮN.
-                        intake.discardArtefact(),   //NHẢ BÓNG.
-                        intake.keepArtefact(),
-
-                        End
-                )
+        ParallelAction Spool1 = new ParallelAction(
+                Path1,
+                launcher.spoolUp()
         );
+        ParallelAction Defer2 = new ParallelAction(
+                Path2,
+                intake.discardArtefact()
+        );
+        ParallelAction Refer3 = new ParallelAction(
+                Path3,
+                intake.takeArtefact()
+        );
+        ParallelAction Spool4 = new ParallelAction(
+                Path4,
+                launcher.spoolUp(),
+                intake.keepArtefact()
+        );
+        ParallelAction Defer5 = new ParallelAction(
+                Path5,
+                intake.discardArtefact()
+        );
+        ParallelAction Refer6 = new ParallelAction(
+                Path6,
+                intake.takeArtefact()
+        );
+        ParallelAction Spool7 = new ParallelAction(
+                Path7,
+                launcher.spoolUp(),
+                intake.keepArtefact()
+        );
+        ParallelAction Defer8 = new ParallelAction(
+                Path8,
+                intake.discardArtefact()
+        );
+        ParallelAction Refer9 = new ParallelAction(
+                Path9,
+                intake.takeArtefact()
+        );
+        ParallelAction SpoolA = new ParallelAction(
+                PathA,
+                launcher.spoolUp(),
+                intake.keepArtefact()
+        );
+
+        SequentialAction Blue = new SequentialAction(
+                Spool1,
+                launcher.launchArtefact(),
+                launcher.halt(),
+                Defer2,
+                Refer3,
+                intake.keepArtefact(),
+                Spool4,
+                launcher.launchArtefact(),
+                launcher.halt(),
+                Defer5,
+                Refer6,
+                intake.keepArtefact(),
+                Spool7,
+                launcher.launchArtefact(),
+                launcher.halt(),
+                Defer8,
+                Refer9,
+                intake.keepArtefact(),
+                SpoolA,
+                launcher.launchArtefact(),
+                launcher.halt()
+        );
+
+        Actions.runBlocking(Blue);
     }
 }
+
+//ENDING POSITION: (+60;-12); HEADING 216.
