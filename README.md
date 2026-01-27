@@ -1,10 +1,10 @@
-FTC Team 33516's code, available for public use since this is really not that good.
+FTC Team <strong>33516</strong>'s code, available for public use since this is really not that good.
 
-_____________________________________________________________________________________________________
-Built based on RoadRunner, thus to use the code, Gradle needs reconfiguration.
+<hr>
+Built based on <i>RoadRunner</i>, thus to use the code, <mark>Gradle needs reconfiguration</mark>.
 
-Version 0.1.0:
-  Class: 'ArtefactHandler'.
+<h1>Version 0.1.0.</h1>
+  <pre>
    +---Class ArtefactHandler:
           +-function takeArtefact:
           |    Power intake motors to take in artefact while spinning launching flywheel backwards.
@@ -18,12 +18,16 @@ Version 0.1.0:
           |    Power up intake motors while launcher motors run.
           +-function Halt:
                Stop all motors involved in launching artefacts.
-Classes also called alongside RoadRunner commands.
-PIDF incorporated into motors to maintain target speeds.
+  </pre>
+<br>
+Classes also called alongside RoadRunner commands.<br>
+PIDF incorporated into motors to maintain target speeds.<br>
 Launcher and servo functions fixed.
 
-Version 0.0.1:
-  Classes: 'Intake' and 'Turret'.
+<hr>
+
+<h1>Version 0.0.1.</h1>
+  <pre>
    +---Class Intake:
    |      +-function takeArtefact:
    |      |     Power intake motors to take in artefact while spinning launching flywheel backwards.
@@ -38,4 +42,8 @@ Version 0.0.1:
           |    Power up intake motors while launcher motors are running.
           +-function Halt:
                Stop all motors involved in launching artefacts.
-Classes called alongside RoadRunner commands.
+  </pre>
+<br>
+Classes called alongside RoadRunner commands.<br>
+
+<hr>
