@@ -13,8 +13,8 @@ import com.qualcomm.robotcore.hardware.Servo;
 
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
 
-@TeleOp(name = "T_BLUE")
-public class _TeleOpBlue_ extends LinearOpMode{
+@TeleOp(name = "T_RED")
+public class _TeleOpRed_ extends LinearOpMode{
 
     DcMotorEx REVLauncherR, REVLauncherL;
 
@@ -33,11 +33,11 @@ public class _TeleOpBlue_ extends LinearOpMode{
     @Override
     public void runOpMode() throws InterruptedException{
 
-        MecanumDrive base = new MecanumDrive(hardwareMap, new Pose2d(0 ,-24 ,0));
+        MecanumDrive base = new MecanumDrive(hardwareMap, new Pose2d(0 ,24 ,0));
 
         /*
-        * Positive rotation direction is clockwise from the perspective opposite the motor.
-        * */
+         * Positive rotation direction is clockwise from the perspective opposite the motor.
+         * */
 
         REVLauncherR = hardwareMap.get(DcMotorEx.class, "REVR");
         REVLauncherR.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
@@ -50,8 +50,8 @@ public class _TeleOpBlue_ extends LinearOpMode{
         REVLauncherL.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         REVLauncherL.setPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER, PIDF);
         /*
-        * All intake motors go counterclockwise.
-        * */
+         * All intake motors go counterclockwise.
+         * */
 
         GoBildaLoader = hardwareMap.get(DcMotor.class, "GoBildaIntake");
         GoBildaLoader.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
@@ -80,9 +80,7 @@ public class _TeleOpBlue_ extends LinearOpMode{
 
         final double AngularScalar = 1;
 
-        final double ServoPower = 0.3;
-
-        double[] Target = {-72, -72};
+        double[] Target = {-72, 72};
 
         double Offset = 0;
 
@@ -95,16 +93,14 @@ public class _TeleOpBlue_ extends LinearOpMode{
             //ROBOT CENTRIC, NOT PLAYER CENTRIC.
 
             Vector2d Motion = new Vector2d(
-                    (-gamepad1.left_stick_y)
-                    * LinearScalar,
-                    (-gamepad1.left_stick_x)
-                    * LinearScalar
+                    -gamepad1.left_stick_y * LinearScalar,
+                    -gamepad1.left_stick_x * LinearScalar
             );
 
             base.setDrivePowers(
                     new PoseVelocity2d(
                             Motion,
-                            - gamepad1.right_stick_x * AngularScalar
+                            -gamepad1.right_stick_x * AngularScalar
                     )
             );
 
@@ -114,26 +110,14 @@ public class _TeleOpBlue_ extends LinearOpMode{
             telemetry.addData("y", base.localizer.getPose().position.y);
             telemetry.addData("h", base.localizer.getPose().heading.toDouble());
 
-            //TARGET LOCATION IS AT (-72;-72).
+            //TARGET LOCATION IS AT (-72;+72).
 
             Distance_Target = Math.sqrt(Math.pow(base.localizer.getPose().position.x - Target[0], 2)
                     + Math.pow(base.localizer.getPose().position.y - Target[1], 2));
 
             /*
-             * Launch speed and servo aiming was determined quasi-empirically.
-             *
-             *  +---------------+---------------+-----------+-----------------------+
-             *  |     POINT     |   LAUNCHER    |   SERVO   |   DISTANCE TO TARGET  |
-             *  +---------------+---------------+-----------+-----------------------+
-             *  |   (+00;+00)   |   2850        |   0.5     |   101.823             |
-             *  |   (-12;-12)   |   2650        |   0       |   84.853              |
-             *  |   (-24;-24)   |   2350        |   0       |   67.882              |
-             *  +---------------+---------------+-----------+-----------------------+
-             *
-             * Position for blue target: (-72;-72).
-             *
+             * Position for red target: (-72;+72).
              * Launcher function: y = 12.96368 x + 1476.66352.
-             *
              * Aimer function: y = 0.0294629 x - 2.
              * */
 
@@ -162,7 +146,7 @@ public class _TeleOpBlue_ extends LinearOpMode{
             } else {
                 REVLoader.setPower(0);
             }
-            //I have got to be real here: what even is theory anymore?
+            //It's a miracle the code works.
             if (gamepad1.a){
                 REVLauncherL.setVelocity((-1100.0 / 60.0) * 28);
                 REVLauncherR.setVelocity((-1100.0 / 60.0) * 28);
@@ -180,7 +164,7 @@ public class _TeleOpBlue_ extends LinearOpMode{
                 Pusher.setPosition(0);
             }
             if (gamepad2.dpadDownWasPressed()){
-                base = new MecanumDrive(hardwareMap, new Pose2d(0, -24, 0));
+                base = new MecanumDrive(hardwareMap, new Pose2d(0, 24, 0));
             }
             if (gamepad1.dpadUpWasPressed()){
                 Offset += 10;
